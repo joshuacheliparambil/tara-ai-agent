@@ -15,8 +15,12 @@ export async function trace(event: Record<string, unknown>): Promise<void> {
     service: "tara-ai-agent",
     ...event,
   };
-  const traceFile = process.env.TRACE_FILE ?? "./trace.ndjson";
-  await fs.promises.appendFile(traceFile, `${JSON.stringify(payload)}\n`, "utf8");
+  const traceFile = process.env.TRACE_FILE ?? (process.env.VERCEL ? "/tmp/tara-trace.ndjson" : "./trace.ndjson");
+  try {
+    await fs.promises.appendFile(traceFile, `${JSON.stringify(payload)}\n`, "utf8");
+  } catch (error) {
+    console.warn("Trace file write skipped:", error instanceof Error ? error.message : String(error));
+  }
 }
 
 export async function createAgentLog(requestId: string, question: string): Promise<void> {
@@ -78,4 +82,3 @@ export async function recordToolExecution(input: {
     ],
   );
 }
-

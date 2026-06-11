@@ -1,9 +1,49 @@
 import "dotenv/config";
 import express from "express";
 import { askTara } from "./agent.js";
+import { buildQuestionCatalog, clearMetadataCache, getDashboardSummary, getDatasetMetadata } from "./catalog.js";
+import { withTransaction } from "./db.js";
+import { ingestSnapshotPayload, SnapshotPayload } from "./ingest.js";
 
 const app = express();
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "30mb" }));
+
+app.get("/api/dataset", async (_req, res) => {
+  try {
+    res.json(await getDatasetMetadata());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/questions", async (_req, res) => {
+  try {
+    res.json({ questions: await buildQuestionCatalog() });
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/dashboard", async (_req, res) => {
+  try {
+    res.json(await getDashboardSummary());
+  } catch (error) {
+    res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.post("/api/dataset/upload", async (req, res) => {
+  try {
+    const payload = req.body as SnapshotPayload;
+    const result = await withTransaction((client) =>
+      ingestSnapshotPayload(client, payload, { sourcePath: "browser_upload", replaceExisting: true }),
+    );
+    clearMetadataCache();
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
 
 app.get("/", (_req, res) => {
   res.type("html").send(`
@@ -33,12 +73,223 @@ app.get("/", (_req, res) => {
 
           * { box-sizing: border-box; }
 
+          [hidden] { display: none !important; }
+
           body {
             margin: 0;
             min-height: 100vh;
             font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
             background: linear-gradient(135deg, #ffffff 0%, #fbf9ff 48%, #f3edff 100%);
             color: var(--ink);
+          }
+
+          .auth-shell {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: minmax(320px, 0.9fr) minmax(460px, 1.1fr);
+            background: linear-gradient(135deg, #f0e8ff 0%, #ffffff 52%, #f7f3ff 100%);
+          }
+
+          .auth-brand {
+            padding: clamp(36px, 6vw, 88px);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            color: #fff;
+            background:
+              radial-gradient(circle at 25% 18%, rgba(255,255,255,.28), transparent 24%),
+              linear-gradient(150deg, #a78bfa 0%, #7c3aed 54%, #4c1d95 100%);
+          }
+
+          .auth-brand .logo {
+            background: rgba(255,255,255,.2);
+            border: 1px solid rgba(255,255,255,.38);
+          }
+
+          .auth-brand h1 {
+            margin: 28px 0 14px;
+            font-size: clamp(42px, 6vw, 72px);
+            line-height: 1;
+            letter-spacing: 0;
+          }
+
+          .auth-brand p {
+            max-width: 520px;
+            margin: 0;
+            color: rgba(255,255,255,.84);
+            font-size: 17px;
+            line-height: 1.6;
+          }
+
+          .auth-points {
+            display: grid;
+            gap: 12px;
+            margin-top: 34px;
+          }
+
+          .auth-point {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: rgba(255,255,255,.9);
+            font-size: 14px;
+          }
+
+          .auth-point span {
+            width: 28px;
+            height: 28px;
+            display: grid;
+            place-items: center;
+            border-radius: 9px;
+            background: rgba(255,255,255,.16);
+          }
+
+          .auth-panel {
+            display: grid;
+            place-items: center;
+            padding: 32px;
+          }
+
+          .auth-card {
+            width: min(470px, 100%);
+            padding: 32px;
+            border: 1px solid var(--line);
+            border-radius: 22px;
+            background: rgba(255,255,255,.9);
+            box-shadow: var(--shadow);
+          }
+
+          .auth-card h2 {
+            margin: 0 0 8px;
+            font-size: 28px;
+            letter-spacing: 0;
+          }
+
+          .auth-copy,
+          .auth-note {
+            color: var(--muted);
+            line-height: 1.5;
+          }
+
+          .auth-copy {
+            margin: 0 0 22px;
+          }
+
+          .auth-tabs {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 6px;
+            padding: 5px;
+            margin-bottom: 20px;
+            border-radius: 12px;
+            background: #f3edff;
+          }
+
+          .auth-tab {
+            min-height: 40px;
+            border: 0;
+            border-radius: 9px;
+            color: var(--muted);
+            background: transparent;
+            cursor: pointer;
+            font-weight: 760;
+          }
+
+          .auth-tab.active {
+            color: var(--lavender-deep);
+            background: #fff;
+            box-shadow: 0 5px 16px rgba(82,49,145,.10);
+          }
+
+          .auth-form {
+            display: grid;
+            gap: 14px;
+          }
+
+          .field {
+            display: grid;
+            gap: 7px;
+          }
+
+          .field label {
+            color: #4d4266;
+            font-size: 13px;
+            font-weight: 760;
+          }
+
+          .field input {
+            min-height: 46px;
+            padding: 0 13px;
+            border: 1px solid var(--line);
+            border-radius: 11px;
+            background: #fff;
+          }
+
+          .field input:focus {
+            outline: 3px solid rgba(139,92,246,.16);
+            border-color: var(--lavender);
+          }
+
+          .auth-primary,
+          .auth-guest,
+          .logout-button {
+            border-radius: 11px;
+            cursor: pointer;
+            font-weight: 800;
+          }
+
+          .auth-primary {
+            min-height: 48px;
+            border: 0;
+            color: #fff;
+            background: linear-gradient(135deg, #9b7cff, #6d3fe3);
+            box-shadow: 0 12px 24px rgba(109,63,227,.2);
+          }
+
+          .auth-divider {
+            display: grid;
+            grid-template-columns: 1fr auto 1fr;
+            align-items: center;
+            gap: 10px;
+            margin: 18px 0;
+            color: var(--muted);
+            font-size: 12px;
+          }
+
+          .auth-divider::before,
+          .auth-divider::after {
+            content: "";
+            height: 1px;
+            background: var(--line);
+          }
+
+          .auth-guest {
+            width: 100%;
+            min-height: 46px;
+            border: 1px solid var(--lavender);
+            color: var(--lavender-deep);
+            background: #faf7ff;
+          }
+
+          .auth-message {
+            min-height: 20px;
+            margin: 12px 0 0;
+            color: #b42318;
+            font-size: 13px;
+          }
+
+          .auth-note {
+            margin: 16px 0 0;
+            font-size: 11px;
+          }
+
+          .logout-button {
+            margin-left: auto;
+            padding: 7px 9px;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            background: #fff;
+            font-size: 11px;
           }
 
           button,
@@ -130,6 +381,56 @@ app.get("/", (_req, res) => {
             cursor: pointer;
             font-weight: 750;
             margin-bottom: 24px;
+          }
+
+          .dataset-manager {
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.72);
+            border-radius: 14px;
+            padding: 12px;
+            margin: -12px 0 20px;
+          }
+
+          .dataset-manager strong {
+            display: block;
+            font-size: 13px;
+            color: var(--violet-ink);
+          }
+
+          .dataset-status {
+            margin: 5px 0 10px;
+            color: var(--muted);
+            font-size: 11px;
+            line-height: 1.45;
+          }
+
+          .upload-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 36px;
+            border: 1px dashed var(--lavender);
+            border-radius: 10px;
+            color: var(--lavender-deep);
+            background: #faf7ff;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 760;
+          }
+
+          .upload-label:hover {
+            background: var(--lavender-soft);
+          }
+
+          .upload-label input {
+            display: none;
+          }
+
+          .upload-progress {
+            display: none;
+            margin-top: 8px;
+            color: var(--lavender-deep);
+            font-size: 11px;
           }
 
           .nav {
@@ -725,6 +1026,22 @@ app.get("/", (_req, res) => {
           }
 
           @media (max-width: 820px) {
+            .auth-shell {
+              grid-template-columns: 1fr;
+            }
+            .auth-brand {
+              min-height: 280px;
+              padding: 30px;
+            }
+            .auth-brand h1 {
+              margin-top: 20px;
+            }
+            .auth-panel {
+              padding: 20px;
+            }
+            .auth-card {
+              padding: 24px;
+            }
             .app {
               grid-template-columns: 1fr;
               padding: 12px;
@@ -764,7 +1081,62 @@ app.get("/", (_req, res) => {
         </style>
       </head>
       <body>
-        <div class="app">
+        <section class="auth-shell" id="authShell">
+          <div class="auth-brand">
+            <div>
+              <div class="brand-row">
+                <div class="logo">✦</div>
+                <div>
+                  <p class="brand-title">Tara AI</p>
+                  <p class="brand-subtitle" style="color:rgba(255,255,255,.72)">Finance Research Assistant</p>
+                </div>
+              </div>
+              <h1>Understand your money.</h1>
+              <p>Upload a finance snapshot, ask questions in natural language, and get answers grounded in PostgreSQL analytics tools.</p>
+              <div class="auth-points">
+                <div class="auth-point"><span>✓</span> Refund and transfer-aware spending analysis</div>
+                <div class="auth-point"><span>✓</span> Fund, holding, and portfolio return calculations</div>
+                <div class="auth-point"><span>✓</span> Dataset-specific questions and live dashboard metrics</div>
+              </div>
+            </div>
+            <p style="font-size:12px;">Local demo authentication. Production deployment should use a managed identity provider.</p>
+          </div>
+
+          <div class="auth-panel">
+            <div class="auth-card">
+              <h2 id="authTitle">Create your Tara account</h2>
+              <p class="auth-copy" id="authCopy">Save your display name and continue to your finance workspace.</p>
+
+              <div class="auth-tabs">
+                <button class="auth-tab active" type="button" data-auth-mode="signup">Sign up</button>
+                <button class="auth-tab" type="button" data-auth-mode="login">Log in</button>
+              </div>
+
+              <form class="auth-form" id="authForm">
+                <div class="field" id="nameField">
+                  <label for="authName">Your name</label>
+                  <input id="authName" name="name" autocomplete="name" placeholder="Enter your display name" />
+                </div>
+                <div class="field">
+                  <label for="authEmail">Email</label>
+                  <input id="authEmail" name="email" type="email" autocomplete="email" placeholder="you@example.com" required />
+                </div>
+                <div class="field">
+                  <label for="authPassword">Password</label>
+                  <input id="authPassword" name="password" type="password" minlength="6" autocomplete="new-password" placeholder="At least 6 characters" required />
+                </div>
+                <button class="auth-primary" id="authSubmit" type="submit">Create account</button>
+              </form>
+
+              <p class="auth-message" id="authMessage"></p>
+              <div class="auth-divider">or</div>
+              <button class="auth-guest" id="guestButton" type="button">Continue as Guest</button>
+              <p class="auth-note">Demo accounts are stored only in this browser using local storage. Passwords are saved as one-way hashes, not sent to Tara or PostgreSQL.</p>
+            </div>
+          </div>
+        </section>
+
+        <div class="app" id="appShell" hidden>
           <aside class="sidebar">
             <div class="brand-row">
               <div class="logo">✦</div>
@@ -775,6 +1147,16 @@ app.get("/", (_req, res) => {
             </div>
 
             <button class="new-chat" type="button" id="newChat">＋ New Conversation</button>
+
+            <section class="dataset-manager">
+              <strong>Dataset Manager</strong>
+              <p class="dataset-status" id="datasetStatus">Checking the active dataset...</p>
+              <label class="upload-label">
+                Upload 3 JSON files
+                <input id="datasetFiles" type="file" accept=".json,application/json" multiple />
+              </label>
+              <div class="upload-progress" id="uploadProgress">Uploading and indexing data...</div>
+            </section>
 
             <nav class="nav" aria-label="Product sections">
               <button class="nav-item active" type="button" data-view="dashboard"><span class="icon">⌂</span> Dashboard</button>
@@ -794,18 +1176,19 @@ app.get("/", (_req, res) => {
             </div>
 
             <div class="profile">
-              <div class="profile-badge">JB</div>
+              <div class="profile-badge" id="profileInitials">GU</div>
               <div>
-                <strong>Demo User</strong>
-                <span>Local demo workspace</span>
+                <strong id="profileName">Guest</strong>
+                <span id="profileMode">Guest workspace</span>
               </div>
+              <button class="logout-button" id="logoutButton" type="button">Log out</button>
             </div>
           </aside>
 
           <main class="main" id="mainView">
             <section class="hero">
               <div>
-                <h1>Hello there!</h1>
+                <h1>Hello, <span id="greetingName">Guest</span>!</h1>
                 <p>Ask me anything about your finances.</p>
               </div>
               <button class="new-chat" type="button" style="width: auto; margin: 0;">↺ History</button>
@@ -845,19 +1228,19 @@ app.get("/", (_req, res) => {
               <div class="insight-grid">
                 <article class="insight-card purple">
                   <div class="insight-top"><div class="insight-icon">▣</div><p class="insight-label">Top Category</p></div>
-                  <p class="insight-value">Food & Dining</p>
-                  <p class="stat-caption">41.2% of tracked spending</p>
+                  <p class="insight-value" id="topCategoryValue">Loading...</p>
+                  <p class="stat-caption" id="topCategoryCaption">From the latest month</p>
                   <div class="bar"><span></span></div>
                 </article>
                 <article class="insight-card pink">
                   <div class="insight-top"><div class="insight-icon">↗</div><p class="insight-label">Investment Return</p></div>
-                  <p class="insight-value">12.45%</p>
+                  <p class="insight-value" id="returnValue">Loading...</p>
                   <p class="stat-caption">Overall returns from holdings</p>
                 </article>
                 <article class="insight-card green">
-                  <div class="insight-top"><div class="insight-icon">↕</div><p class="insight-label">Net Cash Flow</p></div>
-                  <p class="insight-value">₹79,769.25</p>
-                  <p class="stat-caption">Income minus expenses</p>
+                  <div class="insight-top"><div class="insight-icon">↕</div><p class="insight-label">Latest Month Spend</p></div>
+                  <p class="insight-value" id="latestSpendValue">Loading...</p>
+                  <p class="stat-caption">Refund-adjusted, transfers excluded</p>
                 </article>
                 <article class="insight-card purple">
                   <div class="insight-top"><div class="insight-icon">◔</div><p class="insight-label">Asset Allocation</p></div>
@@ -870,9 +1253,9 @@ app.get("/", (_req, res) => {
 
           <aside class="right-rail">
             <section class="stat-card">
-              <div class="stat-top"><span>Financial Snapshot</span><strong>Jun 2026</strong></div>
-              <p class="stat-value">₹12,45,678.90</p>
-              <p class="stat-caption">Total net worth estimate</p>
+              <div class="stat-top"><span>Portfolio Value</span><strong id="dashboardAsOf">Latest data</strong></div>
+              <p class="stat-value" id="portfolioValue">Loading...</p>
+              <p class="stat-caption">Calculated from holdings and latest NAV</p>
               <svg class="sparkline" viewBox="0 0 260 68" role="img" aria-label="spending trend">
                 <path d="M4 52 C24 40, 31 60, 49 42 S78 50, 94 34 S125 43, 141 30 S170 38, 187 22 S218 30, 256 8" fill="none" stroke="#8b5cf6" stroke-width="4" stroke-linecap="round" />
                 <path d="M4 66 L4 52 C24 40, 31 60, 49 42 S78 50, 94 34 S125 43, 141 30 S170 38, 187 22 S218 30, 256 8 L256 66 Z" fill="rgba(139,92,246,.12)" />
@@ -880,9 +1263,9 @@ app.get("/", (_req, res) => {
             </section>
 
             <section class="stat-card">
-              <div class="stat-top"><span>Total Investments</span><strong>▲ 8.45%</strong></div>
-              <p class="stat-value">₹8,75,430.50</p>
-              <p class="stat-caption">Portfolio performance from NAVs</p>
+              <div class="stat-top"><span>Cost Basis</span><strong id="portfolioReturn">Loading...</strong></div>
+              <p class="stat-value" id="costBasisValue">Loading...</p>
+              <p class="stat-caption">Original investment cost</p>
               <svg class="sparkline" viewBox="0 0 260 68" role="img" aria-label="portfolio trend">
                 <path d="M4 55 C24 48, 32 56, 48 44 S75 48, 91 35 S122 43, 140 30 S169 35, 184 20 S220 28, 256 10" fill="none" stroke="#2563eb" stroke-width="4" stroke-linecap="round" />
                 <path d="M4 66 L4 55 C24 48, 32 56, 48 44 S75 48, 91 35 S122 43, 140 30 S169 35, 184 20 S220 28, 256 10 L256 66 Z" fill="rgba(37,99,235,.10)" />
@@ -890,15 +1273,15 @@ app.get("/", (_req, res) => {
             </section>
 
             <section class="stat-card">
-              <div class="stat-top"><span>Total Spent</span><strong>May 2025</strong></div>
-              <p class="stat-value">₹45,230.75</p>
-              <p class="stat-caption">▲ 12.32% vs prior month</p>
+              <div class="stat-top"><span>Realised Gain</span><strong>Latest NAV</strong></div>
+              <p class="stat-value" id="gainValue">Loading...</p>
+              <p class="stat-caption">Current value minus cost basis</p>
             </section>
 
             <section class="stat-card">
-              <div class="stat-top"><span>Total Income</span><strong>May 2025</strong></div>
-              <p class="stat-value">₹1,25,000.00</p>
-              <p class="stat-caption">▲ 5.20% vs prior month</p>
+              <div class="stat-top"><span>Loaded Records</span><strong id="snapshotLabel">Active snapshot</strong></div>
+              <p class="stat-value" id="recordCountValue">Loading...</p>
+              <p class="stat-caption">Transactions available to Tara</p>
             </section>
           </aside>
 
@@ -914,6 +1297,114 @@ app.get("/", (_req, res) => {
           const form = document.querySelector("#askForm");
           const input = document.querySelector("#question");
           const button = document.querySelector("#askButton");
+          const authShell = document.querySelector("#authShell");
+          const appShell = document.querySelector("#appShell");
+          const authForm = document.querySelector("#authForm");
+          const authName = document.querySelector("#authName");
+          const authEmail = document.querySelector("#authEmail");
+          const authPassword = document.querySelector("#authPassword");
+          const authMessage = document.querySelector("#authMessage");
+          let authMode = "signup";
+
+          async function hashPassword(password) {
+            const bytes = new TextEncoder().encode(password);
+            const digest = await crypto.subtle.digest("SHA-256", bytes);
+            return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+          }
+
+          function getUsers() {
+            try {
+              return JSON.parse(localStorage.getItem("taraDemoUsers") || "[]");
+            } catch {
+              return [];
+            }
+          }
+
+          function setSession(profile) {
+            localStorage.setItem("taraSession", JSON.stringify(profile));
+            showWorkspace(profile);
+          }
+
+          function showWorkspace(profile) {
+            const name = profile.name || "Guest";
+            const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0].toUpperCase()).join("") || "GU";
+            document.querySelector("#greetingName").textContent = name;
+            document.querySelector("#profileName").textContent = name;
+            document.querySelector("#profileInitials").textContent = initials;
+            document.querySelector("#profileMode").textContent = profile.guest ? "Guest workspace" : profile.email;
+            authShell.hidden = true;
+            appShell.hidden = false;
+            refreshDatasetExperience();
+          }
+
+          function showAuth() {
+            authShell.hidden = false;
+            appShell.hidden = true;
+            authMessage.textContent = "";
+            authForm.reset();
+          }
+
+          function setAuthMode(mode) {
+            authMode = mode;
+            document.querySelectorAll(".auth-tab").forEach((tab) => {
+              tab.classList.toggle("active", tab.dataset.authMode === mode);
+            });
+            document.querySelector("#nameField").hidden = mode === "login";
+            authName.required = mode === "signup";
+            authPassword.autocomplete = mode === "signup" ? "new-password" : "current-password";
+            document.querySelector("#authTitle").textContent = mode === "signup" ? "Create your Tara account" : "Welcome back";
+            document.querySelector("#authCopy").textContent =
+              mode === "signup"
+                ? "Save your display name and continue to your finance workspace."
+                : "Log in to continue with your saved display name.";
+            document.querySelector("#authSubmit").textContent = mode === "signup" ? "Create account" : "Log in";
+            authMessage.textContent = "";
+          }
+
+          document.querySelectorAll(".auth-tab").forEach((tab) => {
+            tab.addEventListener("click", () => setAuthMode(tab.dataset.authMode));
+          });
+
+          authForm.addEventListener("submit", async (event) => {
+            event.preventDefault();
+            authMessage.textContent = "";
+            const email = authEmail.value.trim().toLowerCase();
+            const password = authPassword.value;
+            const users = getUsers();
+
+            if (authMode === "signup") {
+              const name = authName.value.trim();
+              if (name.length < 2) {
+                authMessage.textContent = "Please enter your name.";
+                return;
+              }
+              if (users.some((user) => user.email === email)) {
+                authMessage.textContent = "An account with this email already exists. Choose Log in.";
+                return;
+              }
+              const passwordHash = await hashPassword(password);
+              users.push({ name, email, passwordHash });
+              localStorage.setItem("taraDemoUsers", JSON.stringify(users));
+              setSession({ name, email, guest: false });
+              return;
+            }
+
+            const user = users.find((candidate) => candidate.email === email);
+            if (!user || user.passwordHash !== await hashPassword(password)) {
+              authMessage.textContent = "Email or password does not match a local demo account.";
+              return;
+            }
+            setSession({ name: user.name, email: user.email, guest: false });
+          });
+
+          document.querySelector("#guestButton").addEventListener("click", () => {
+            setSession({ name: "Guest", guest: true });
+          });
+
+          document.querySelector("#logoutButton").addEventListener("click", () => {
+            localStorage.removeItem("taraSession");
+            showAuth();
+          });
 
           function addMessage(text, role) {
             const row = document.createElement("div");
@@ -963,12 +1454,12 @@ app.get("/", (_req, res) => {
             ask(question);
           });
 
-          document.querySelectorAll(".prompt, .recent-question, .action").forEach((example) => {
-            example.addEventListener("click", () => {
-              const question = example.dataset.question || example.textContent.replace("›", "").trim();
-              input.value = question;
-              form.requestSubmit();
-            });
+          document.addEventListener("click", (event) => {
+            const example = event.target.closest(".prompt, .recent-question, .action");
+            if (!example) return;
+            const question = example.dataset.question || example.textContent.replace("›", "").trim();
+            input.value = question;
+            form.requestSubmit();
           });
 
           document.querySelectorAll(".nav-item").forEach((item) => {
@@ -996,6 +1487,111 @@ app.get("/", (_req, res) => {
             chat.innerHTML = '<div class="message-row"><div class="mini-logo">✦</div><div class="message tara">New conversation started. Ask me a finance question grounded in your database.</div></div>';
             input.focus();
           });
+
+          const datasetFiles = document.querySelector("#datasetFiles");
+          const datasetStatus = document.querySelector("#datasetStatus");
+          const uploadProgress = document.querySelector("#uploadProgress");
+
+          datasetFiles.addEventListener("change", async () => {
+            const files = [...datasetFiles.files];
+            const byName = Object.fromEntries(files.map((file) => [file.name.toLowerCase(), file]));
+            const required = ["transactions.json", "funds.json", "holdings.json"];
+            const missing = required.filter((name) => !byName[name]);
+            if (missing.length > 0) {
+              datasetStatus.textContent = "Select transactions.json, funds.json, and holdings.json together.";
+              datasetFiles.value = "";
+              return;
+            }
+
+            uploadProgress.style.display = "block";
+            datasetFiles.disabled = true;
+            try {
+              const [transactions, funds, holdings] = await Promise.all(
+                required.map(async (name) => JSON.parse(await byName[name].text()))
+              );
+              const response = await fetch("/api/dataset/upload", {
+                method: "POST",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                  snapshotName: "ui_upload_" + new Date().toISOString().slice(0, 19).replace(/[:T]/g, "_"),
+                  transactions,
+                  funds,
+                  holdings
+                })
+              });
+              const result = await response.json();
+              if (!response.ok) throw new Error(result.error || "Dataset upload failed");
+              addMessage(
+                "Dataset loaded successfully: " + result.transactions + " transactions, " +
+                result.funds + " funds, " + result.holdings + " holdings, and " +
+                result.navPoints + " NAV points.",
+                "tara"
+              );
+              await refreshDatasetExperience();
+            } catch (error) {
+              datasetStatus.textContent = "Upload failed: " + error.message;
+            } finally {
+              uploadProgress.style.display = "none";
+              datasetFiles.disabled = false;
+              datasetFiles.value = "";
+            }
+          });
+
+          async function refreshDatasetExperience() {
+            try {
+              const [datasetResponse, questionResponse, dashboardResponse] = await Promise.all([
+                fetch("/api/dataset"),
+                fetch("/api/questions"),
+                fetch("/api/dashboard")
+              ]);
+              const dataset = await datasetResponse.json();
+              const catalog = await questionResponse.json();
+              const dashboard = await dashboardResponse.json();
+              datasetStatus.textContent = dataset.transactionCount
+                ? dataset.snapshotName + ": " + dataset.transactionCount + " transactions, " +
+                  dataset.fundCount + " funds, " + dataset.holdingCount + " holdings"
+                : "No dataset loaded yet.";
+
+              const promptContainer = document.querySelector(".prompts");
+              if (promptContainer && Array.isArray(catalog.questions)) {
+                promptContainer.innerHTML = catalog.questions.slice(0, 6).map((item) =>
+                  '<button class="prompt" type="button" data-question="' +
+                  item.question.replace(/"/g, "&quot;") + '">' + item.group + '</button>'
+                ).join("");
+              }
+
+              const formatMoney = (value, currency) =>
+                (currency || "INR") + " " + Number(value || 0).toLocaleString("en-IN", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2
+                });
+              const setText = (selector, value) => {
+                const element = document.querySelector(selector);
+                if (element) element.textContent = value;
+              };
+              setText("#portfolioValue", formatMoney(dashboard.current_value, dashboard.currency));
+              setText("#costBasisValue", formatMoney(dashboard.cost_basis, dashboard.currency));
+              setText("#gainValue", formatMoney(dashboard.gain, dashboard.currency));
+              setText("#portfolioReturn", dashboard.return_pct == null ? "No return data" : dashboard.return_pct + "% return");
+              setText("#latestSpendValue", formatMoney(dashboard.monthly_spend, dashboard.currency));
+              setText("#returnValue", dashboard.return_pct == null ? "N/A" : dashboard.return_pct + "%");
+              setText("#topCategoryValue", dashboard.top_category || "No category");
+              setText("#topCategoryCaption", formatMoney(dashboard.top_category_spend, dashboard.currency) + " in latest month");
+              setText("#dashboardAsOf", dashboard.as_of_date || "Latest data");
+              setText("#recordCountValue", Number(dataset.transactionCount || 0).toLocaleString("en-IN"));
+              setText("#snapshotLabel", dataset.snapshotName || "No snapshot");
+            } catch {
+              datasetStatus.textContent = "Dataset status is unavailable.";
+            }
+          }
+
+          try {
+            const session = JSON.parse(localStorage.getItem("taraSession") || "null");
+            if (session?.name) showWorkspace(session);
+            else showAuth();
+          } catch {
+            showAuth();
+          }
         </script>
       </body>
     </html>
@@ -1043,6 +1639,10 @@ app.post("/ask", async (req, res) => {
 });
 
 const port = Number(process.env.PORT ?? 3000);
-app.listen(port, () => {
-  console.log(`Tara AI Agent listening on http://localhost:${port}`);
-});
+if (!process.env.VERCEL) {
+  app.listen(port, () => {
+    console.log(`Tara AI Agent listening on http://localhost:${port}`);
+  });
+}
+
+export default app;

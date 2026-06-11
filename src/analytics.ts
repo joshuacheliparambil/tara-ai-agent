@@ -288,7 +288,7 @@ export async function computeHoldingReturns(input: HoldingReturnInput): Promise<
 }
 
 export async function portfolioValue(): Promise<Record<string, unknown>> {
-  const rows = await query(
+  const rows = await query<Record<string, unknown>>(
     `
     select round(sum(h.units * latest.nav), 2) as current_value,
            round(sum(h.units * h.purchase_nav), 2) as cost_basis,

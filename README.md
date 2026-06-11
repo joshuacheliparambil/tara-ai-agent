@@ -144,6 +144,30 @@ npm run test
 - What is my realised return on my Sentinel Nifty Index Fund holding, given when I bought it?
 - What is my portfolio worth today, and how much have I made on it in absolute INR?
 
+## Uploading A Dataset From The UI
+
+Open `http://localhost:3000/` and use **Dataset Manager** in the sidebar.
+
+Select these three files together:
+
+- `transactions.json`
+- `funds.json`
+- `holdings.json`
+
+Tara validates the JSON, replaces the active demo snapshot, normalizes the data, performs batched PostgreSQL inserts, and refreshes dataset-specific question suggestions. Uploaded financial data is sent only to the locally running Tara server and configured PostgreSQL database.
+
+The question chips are generated from the active dataset's categories, merchants, funds, and available date range. The 12-question eval suite remains a regression test; it is not a limit on what the chat accepts.
+
+## Signup, Login, And Guest Mode
+
+The entry screen offers:
+
+- **Sign up** with display name, email, and password.
+- **Log in** to a previously created local demo account.
+- **Continue as Guest** without creating an account.
+
+Tara greets the active profile by name. Demo accounts and sessions are stored in browser `localStorage`; passwords are stored only as SHA-256 hashes. This is suitable for a portfolio demo, not production authentication. A production version should use Clerk, Auth0, Supabase Auth, or another managed identity provider.
+
 ## Tool Design
 
 Tara uses five expressive tools:
@@ -198,6 +222,36 @@ Known free-tier tradeoffs:
 - Render web services may cold start.
 - Neon/Supabase free tiers may pause or limit compute.
 - Eval results and traces are intentionally lightweight.
+
+### Vercel
+
+The repository includes:
+
+- `api/index.ts`: Vercel serverless Express handler.
+- `vercel.json`: routes all requests through Tara's Express application.
+- `vercel-build`: TypeScript build script.
+
+Deployment steps:
+
+1. Push the repository to GitHub.
+2. Import `joshuacheliparambil/tara-ai-agent` in Vercel.
+3. Add a managed PostgreSQL database using Neon or Supabase.
+4. Add this Vercel environment variable:
+
+```text
+DATABASE_URL=postgresql://...
+```
+
+5. From your computer, temporarily set the hosted `DATABASE_URL`, then run:
+
+```bash
+npm run db:migrate
+DATA_DIR=./data/sample_a npm run ingest
+```
+
+6. Deploy or redeploy the Vercel project.
+
+The browser dataset uploader can replace the active snapshot after deployment. The provided sample snapshots are small enough for the serverless request size, but very large datasets should use object storage and background ingestion.
 
 ## Design Notes
 

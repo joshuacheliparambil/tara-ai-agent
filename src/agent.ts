@@ -1,4 +1,5 @@
 import { AskResponse } from "./types.js";
+import { getDatasetMetadata } from "./catalog.js";
 import { createAgentLog, finishAgentLog, newRequestId, trace } from "./observability.js";
 import { runTool } from "./tools.js";
 
@@ -35,7 +36,7 @@ export async function askTara(question: string): Promise<AskResponse> {
   await trace({ request_id: requestId, event_type: "ask_started", question });
 
   try {
-    const plan = planQuestion(question);
+    const plan = await planQuestion(question);
     const results: Record<string, unknown>[] = [];
     const toolsCalled: string[] = [];
     for (const step of plan.steps) {
@@ -68,9 +69,10 @@ export async function askTara(question: string): Promise<AskResponse> {
   }
 }
 
-function planQuestion(question: string): AgentPlan {
+async function planQuestion(question: string): Promise<AgentPlan> {
   const q = question.toLowerCase();
-  const range = extractDateRange(q);
+  const metadata = await getDatasetMetadata();
+  const range = extractDateRange(q, metadata.dateStart ?? undefined, metadata.dateEnd ?? undefined);
 
   if (q.includes("recurring") || q.includes("subscription")) {
     return {
@@ -97,7 +99,7 @@ function planQuestion(question: string): AgentPlan {
     };
   }
 
-  if (q.includes("fund") || q.includes("return")) {
+  if (/\b(fund|funds|return|returns)\b/.test(q)) {
     const fundName = extractFundName(question);
     const rankAll = q.includes("rank all") || q.includes("best") || q.includes("worst");
     return {
@@ -106,8 +108,8 @@ function planQuestion(question: string): AgentPlan {
         {
           toolName: "compute_fund_returns",
           input: {
-            startDate: range.startDate ?? "2024-01-01",
-            endDate: range.endDate ?? "2025-01-01",
+            startDate: range.startDate ?? metadata.dateStart ?? "2024-01-01",
+            endDate: range.endDate ?? metadata.dateEnd ?? "2025-01-01",
             fundName,
             rankAll,
           },
@@ -133,6 +135,22 @@ function planQuestion(question: string): AgentPlan {
     };
   }
 
+  if ((q.includes("month by month") || q.includes("monthly")) && !q.includes("compare")) {
+    return {
+      intent: "monthly_spend",
+      steps: [{ toolName: "query_transactions", input: { ...range, aggregate: "by_month" } }],
+      renderer: ([result]) => renderRows("Monthly net spend", result, "month", "net_spend"),
+    };
+  }
+
+  if (q.includes("average") && (q.includes("spend") || q.includes("expense"))) {
+    return {
+      intent: "average_spend",
+      steps: [{ toolName: "query_transactions", input: { ...range, aggregate: "average" } }],
+      renderer: ([result]) => renderAverageSpend(result),
+    };
+  }
+
   if (q.includes("biggest increase") && q.includes("category")) {
     return {
       intent: "category_mom_increase",
@@ -141,13 +159,18 @@ function planQuestion(question: string): AgentPlan {
     };
   }
 
-  if (q.includes("compare") && (q.includes("food") || q.includes("travel"))) {
+  const mentionedCategories = metadata.categories.filter((category) => {
+    const normalized = category.toLowerCase();
+    if (normalized === "transfer" && /\b(ignore|exclude|without)\s+transfers?\b/.test(q)) return false;
+    return q.includes(normalized);
+  });
+  if (q.includes("compare") && mentionedCategories.length >= 2) {
     return {
       intent: "category_comparison",
       steps: [
         {
           toolName: "query_transactions",
-          input: { ...range, aggregate: "compare_categories", categories: extractCategories(q) },
+          input: { ...range, aggregate: "compare_categories", categories: mentionedCategories },
         },
       ],
       renderer: ([result]) => renderCategoryComparison(result),
@@ -162,8 +185,12 @@ function planQuestion(question: string): AgentPlan {
     };
   }
 
-  const category = extractCategory(q);
-  const merchant = extractMerchant(question);
+  const category = metadata.categories.find((value) => {
+    const normalized = value.toLowerCase();
+    if (normalized === "transfer" && /\b(ignore|exclude|without)\s+transfers?\b/.test(q)) return false;
+    return q.includes(normalized);
+  });
+  const merchant = category ? undefined : extractMerchant(question, metadata.merchants);
   return {
     intent: "spend_total",
     steps: [{ toolName: "query_transactions", input: { ...range, category, merchant, aggregate: "total" } }],
@@ -171,7 +198,11 @@ function planQuestion(question: string): AgentPlan {
   };
 }
 
-function extractDateRange(q: string): { startDate?: string; endDate?: string } {
+function extractDateRange(
+  q: string,
+  availableStart?: string,
+  availableEnd?: string,
+): { startDate?: string; endDate?: string } {
   const explicit = [...q.matchAll(/(20\d{2}-\d{2}-\d{2})/g)].map((match) => match[1]);
   if (explicit.length >= 2) return { startDate: explicit[0], endDate: explicit[1] };
   if (q.includes("q1 2025")) return { startDate: "2025-01-01", endDate: "2025-03-31" };
@@ -184,28 +215,24 @@ function extractDateRange(q: string): { startDate?: string; endDate?: string } {
     const endDate = new Date(Number(year), Number(month[1]), 0).toISOString().slice(0, 10);
     return { startDate, endDate };
   }
-  if (q.includes("last month")) return { startDate: "2025-03-01", endDate: "2025-03-31" };
+  if (q.includes("available data period") && availableStart && availableEnd) {
+    return { startDate: availableStart, endDate: availableEnd };
+  }
+  if (q.includes("last month") && availableEnd) {
+    const end = new Date(`${availableEnd}T00:00:00Z`);
+    const startDate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), 1)).toISOString().slice(0, 10);
+    const endDate = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    return { startDate, endDate };
+  }
   return {};
 }
 
-function extractCategory(q: string): string | undefined {
-  const known = ["food", "travel", "rent", "health", "transport", "subscription", "shopping", "groceries", "utilities"];
-  return known.find((category) => q.includes(category));
-}
-
-function extractCategories(q: string): string[] {
-  const categories = ["food", "travel", "rent", "health", "transport", "subscription", "shopping", "groceries", "utilities"].filter((category) =>
-    q.includes(category),
-  );
-  return categories.length >= 2 ? categories : ["food", "travel"];
-}
-
-function extractMerchant(question: string): string | undefined {
-  const match = question.match(/spent on ([A-Za-z0-9 *.-]+)/i);
+function extractMerchant(question: string, merchants: string[]): string | undefined {
+  const directMatch = merchants.find((merchant) => question.toLowerCase().includes(merchant.toLowerCase()));
+  if (directMatch) return directMatch;
+  const match = question.match(/(?:spent|spend)\s+(?:on|at)\s+([A-Za-z0-9 *.-]+)/i);
   if (!match) return undefined;
-  const value = match[1].replace(/,.*$/, "").replace(/ in .*$/i, "").trim();
-  if (["food", "travel", "rent", "health", "transport"].includes(value.toLowerCase())) return undefined;
-  return value || undefined;
+  return match[1].replace(/,.*$/, "").replace(/\s+(?:in|from|between|during)\s+.*$/i, "").trim() || undefined;
 }
 
 function extractFundName(question: string): string | undefined {
@@ -233,6 +260,12 @@ function renderTotalSpend(result: Record<string, unknown>, context: { category?:
   const target = context.merchant ? ` on ${context.merchant}` : context.category ? ` for ${context.category}` : "";
   const period = context.range.startDate && context.range.endDate ? ` from ${context.range.startDate} to ${context.range.endDate}` : "";
   return `Your refund-adjusted spend${target}${period} was ${money(total, currency)} across ${rowCount} matching transaction(s). Transfers were excluded.`;
+}
+
+function renderAverageSpend(result: Record<string, unknown>): string {
+  const rowCount = Number(result.row_count ?? 0);
+  if (rowCount === 0) return "I could not find matching transaction data for that question.";
+  return `The average matching transaction was ${money(result.average_spend, String(result.currency ?? "INR"))} across ${rowCount} transaction(s). Transfers were excluded.`;
 }
 
 function renderRows(title: string, result: Record<string, unknown>, labelKey: string, valueKey: string): string {

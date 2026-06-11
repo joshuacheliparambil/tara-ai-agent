@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
-    "start": "node dist/server.js",
+    "start": "node dist/src/server.js",
     "build": "tsc",
+    "vercel-build": "tsc",
     "db:migrate": "tsx scripts/migrate.ts",
     "ingest": "tsx scripts/ingest.ts",
     "eval": "tsx scripts/eval.ts",
@@ -29,4 +30,3 @@
     "typescript": "^5.7.3"
   }
 }
-

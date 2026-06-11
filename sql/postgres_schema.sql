@@ -26,6 +26,7 @@ create table if not exists funds (
 );
 
 create index if not exists ix_funds_name on funds using gin (to_tsvector('simple', fund_name));
+create index if not exists ix_funds_name_lower on funds(lower(fund_name));
 
 create table if not exists fund_navs (
   fund_id text not null references funds(fund_id) on delete cascade,
@@ -88,6 +89,8 @@ create index if not exists ix_transactions_category_date on transactions(categor
 create index if not exists ix_transactions_merchant_date on transactions(canonical_merchant, transaction_date);
 create index if not exists ix_transactions_flags_date on transactions(is_transfer, is_refund, transaction_date);
 create index if not exists ix_transactions_merchant_key on transactions(merchant_key);
+create index if not exists ix_transactions_category_lower_date on transactions(lower(category), transaction_date);
+create index if not exists ix_transactions_merchant_lower_date on transactions(lower(canonical_merchant), transaction_date);
 
 create table if not exists agent_logs (
   agent_log_id uuid primary key default gen_random_uuid(),
@@ -132,4 +135,3 @@ create table if not exists evaluation_results (
   failure_reason text,
   created_at timestamptz not null default now()
 );
-
